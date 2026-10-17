@@ -196,8 +196,26 @@ def scatter_max_to_nodes(edge_features, dst, num_nodes):
     index = dst.unsqueeze(-1).expand(-1, F)
     return out.scatter_reduce(0, index, edge_features, reduce="amax", include_self=True)
 
-# Step 9 - compute_messages (not yet solved)
-# TODO: implement
+# Step 9 - compute_messages
+def compute_messages(node_features, src, dst, message_fn, edge_attr=None):
+    """Build per-edge messages via gather + message_fn.
+
+    Args:
+        node_features: FloatTensor of shape (N, F).
+        src: LongTensor of shape (E,) source indices.
+        dst: LongTensor of shape (E,) destination indices.
+        message_fn: callable(src_feats, dst_feats[, edge_attr]) -> messages.
+        edge_attr: optional FloatTensor of shape (E, Fe).
+
+    Returns:
+        messages: FloatTensor of shape (E, M).
+    """
+    src_feats = node_features.index_select(0, src)  # (E, F)
+    dst_feats = node_features.index_select(0, dst)  # (E, F)
+
+    if edge_attr is None:
+        return message_fn(src_feats, dst_feats)
+    return message_fn(src_feats, dst_feats, edge_attr)
 
 # Step 10 - aggregate_messages (not yet solved)
 # TODO: implement
