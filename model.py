@@ -150,8 +150,30 @@ def scatter_sum_to_nodes(edge_features, dst, num_nodes):
     )
     return out.index_add(0, dst, edge_features)
 
-# Step 7 - scatter_mean_to_nodes (not yet solved)
-# TODO: implement
+# Step 7 - scatter_mean_to_nodes
+def scatter_mean_to_nodes(edge_features, dst, num_nodes):
+    """Scatter-mean edge features onto destination nodes (sum, then divide by in-degree).
+
+    Args:
+        edge_features: FloatTensor of shape (E, F), one feature row per edge.
+        dst: LongTensor of shape (E,), destination node index for each edge.
+        num_nodes: int, number of nodes N in the graph.
+
+    Returns:
+        FloatTensor of shape (N, F); row j is the mean of edge features with dst == j.
+        Nodes with no incoming edges get a zero row.
+    """
+    out = torch.zeros(
+        num_nodes, edge_features.size(1),
+        dtype=edge_features.dtype, device=edge_features.device,
+    )
+    out = out.index_add(0, dst, edge_features)
+
+    counts = torch.zeros(num_nodes, dtype=edge_features.dtype, device=edge_features.device)
+    counts = counts.index_add(0, dst, torch.ones_like(dst, dtype=edge_features.dtype))
+
+    # Clamp so isolated nodes give 0 / 1 = 0 instead of 0 / 0 = NaN.
+    return out / counts.clamp(min=1).unsqueeze(-1)
 
 # Step 8 - scatter_max_to_nodes (not yet solved)
 # TODO: implement
