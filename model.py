@@ -175,8 +175,26 @@ def scatter_mean_to_nodes(edge_features, dst, num_nodes):
     # Clamp so isolated nodes give 0 / 1 = 0 instead of 0 / 0 = NaN.
     return out / counts.clamp(min=1).unsqueeze(-1)
 
-# Step 8 - scatter_max_to_nodes (not yet solved)
-# TODO: implement
+# Step 8 - scatter_max_to_nodes
+def scatter_max_to_nodes(edge_features, dst, num_nodes):
+    """Scatter-max edge features onto destination nodes (elementwise max).
+
+    Args:
+        edge_features: FloatTensor of shape (E, F), one feature row per edge.
+        dst: LongTensor of shape (E,), destination node index for each edge.
+        num_nodes: int, number of nodes N in the graph.
+
+    Returns:
+        FloatTensor of shape (N, F); row j is the elementwise max of edge
+        features with dst == j. Nodes with no incoming edges stay at -inf.
+    """
+    F = edge_features.size(1)
+    out = torch.full(
+        (num_nodes, F), float("-inf"),
+        dtype=edge_features.dtype, device=edge_features.device,
+    )
+    index = dst.unsqueeze(-1).expand(-1, F)
+    return out.scatter_reduce(0, index, edge_features, reduce="amax", include_self=True)
 
 # Step 9 - compute_messages (not yet solved)
 # TODO: implement
