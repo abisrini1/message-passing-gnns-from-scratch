@@ -434,8 +434,40 @@ def gcn_layer_forward(node_features, src, dst, weight, bias=None, num_nodes=None
         out = activation(out)
     return out
 
-# Step 17 - init_gcn_parameters (not yet solved)
-# TODO: implement
+# Step 17 - init_gcn_parameters
+import math
+import torch
+import torch.nn as nn
+
+
+def init_gcn_parameters(in_dim, out_dim, with_bias=True, seed=None):
+    """Initialize GCN parameters with Glorot (Xavier) uniform weights.
+
+    Args:
+        in_dim: int, input feature dimension.
+        out_dim: int, output feature dimension.
+        with_bias: bool, whether to create a bias vector.
+        seed: optional int for reproducible initialization.
+
+    Returns:
+        dict with:
+            'weight': nn.Parameter of shape (in_dim, out_dim), drawn from
+                U(-a, a) with a = sqrt(6 / (in_dim + out_dim)).
+            'bias': nn.Parameter of shape (out_dim,), zero-initialized.
+                Only present when with_bias is True.
+    """
+    generator = None
+    if seed is not None:
+        generator = torch.Generator()
+        generator.manual_seed(seed)
+
+    limit = math.sqrt(6.0 / (in_dim + out_dim))
+    weight = (torch.rand(in_dim, out_dim, generator=generator) * 2.0 - 1.0) * limit
+
+    params = {'weight': nn.Parameter(weight)}
+    if with_bias:
+        params['bias'] = nn.Parameter(torch.zeros(out_dim))
+    return params
 
 # Step 18 - gcn_stack_forward (not yet solved)
 # TODO: implement
