@@ -1067,8 +1067,31 @@ def generate_sbm_graph(num_nodes, num_classes, p_in, p_out, feature_dim, seed=No
         'node_labels': labels,
     }
 
-# Step 33 - build_node_classification_dataset (not yet solved)
-# TODO: implement
+# Step 33 - build_node_classification_dataset
+def build_node_classification_dataset(num_graphs, num_nodes, num_classes, p_in, p_out, feature_dim, seed=None):
+    """Build a list of SBM graphs with a consistent schema for node classification.
+
+    Args:
+        num_graphs: int, number of graphs to generate.
+        num_nodes: int, nodes per graph.
+        num_classes: int, number of communities (classes).
+        p_in: float, within-community edge probability.
+        p_out: float, cross-community edge probability.
+        feature_dim: int, node feature dimension.
+        seed: optional int; graph i is generated with seed + i, so graphs
+            differ from each other but the whole dataset is reproducible.
+
+    Returns:
+        list of num_graphs dicts, each as returned by generate_sbm_graph
+        ('num_nodes', 'node_features', 'edge_index', 'node_labels').
+    """
+    dataset = []
+    for i in range(num_graphs):
+        graph_seed = None if seed is None else seed + i
+        dataset.append(
+            generate_sbm_graph(num_nodes, num_classes, p_in, p_out, feature_dim, seed=graph_seed)
+        )
+    return dataset
 
 # Step 34 - generate_molecule_like_graph (not yet solved)
 # TODO: implement
