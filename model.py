@@ -1463,8 +1463,33 @@ def representation_similarity(features_a, features_b):
     norm_b = features_b.norm(dim=1).clamp(min=eps)
     return (dot / (norm_a * norm_b)).mean()
 
-# Step 45 - oversmoothing_diagnostic (not yet solved)
-# TODO: implement
+# Step 45 - oversmoothing_diagnostic
+def oversmoothing_diagnostic(layer_features):
+    """Diagnose oversmoothing via consecutive-layer representation similarities.
+
+    Args:
+        layer_features: list of L FloatTensors, each (N, F), the node
+            representations after each layer (for example the second value
+            returned by gcn_stack_forward). All layers need the same F.
+
+    Returns:
+        dict with:
+            'pairwise_similarities': list of L - 1 Python floats; entry i is the
+                mean row-wise cosine similarity between layer i and layer i + 1.
+            'mean_similarity': Python float, the mean of those values
+                (0.0 when there are fewer than two layers).
+        Values that climb toward 1 with depth mean the layers have stopped
+        changing the representation.
+    """
+    pairwise = []
+    for h_prev, h_next in zip(layer_features[:-1], layer_features[1:]):
+        pairwise.append(representation_similarity(h_prev, h_next).item())
+
+    mean_similarity = sum(pairwise) / len(pairwise) if pairwise else 0.0
+    return {
+        'mean_similarity': mean_similarity,
+        'pairwise_similarities': pairwise,
+    }
 
 # Step 46 - mpnn_gnn_experiment (not yet solved)
 # TODO: implement
