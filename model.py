@@ -642,8 +642,32 @@ def gat_head_forward(node_features, src, dst, weight, attn_src, attn_dst, bias=N
 
     return head_out, attn_coeffs
 
-# Step 22 - merge_gat_heads (not yet solved)
-# TODO: implement
+# Step 22 - merge_gat_heads
+def merge_gat_heads(head_outputs, mode='concat'):
+    """Merge multi-head GAT outputs into one node-feature tensor.
+
+    Args:
+        head_outputs: either a list of K FloatTensors of shape (N, Fout),
+            or a single stacked FloatTensor of shape (K, N, Fout).
+        mode: 'concat' to concatenate heads along the feature dimension
+            (hidden layers), or 'mean' to average them (output layer).
+
+    Returns:
+        FloatTensor of shape (N, K * Fout) for 'concat',
+        or (N, Fout) for 'mean'.
+    """
+    if isinstance(head_outputs, torch.Tensor):
+        stacked = head_outputs  # (K, N, Fout)
+    else:
+        stacked = torch.stack(list(head_outputs), dim=0)  # (K, N, Fout)
+
+    if mode == 'concat':
+        K, N, Fout = stacked.shape
+        # (K, N, Fout) -> (N, K, Fout) -> (N, K * Fout)
+        return stacked.permute(1, 0, 2).reshape(N, K * Fout)
+    if mode == 'mean':
+        return stacked.mean(dim=0)
+    raise ValueError(f"mode must be 'concat' or 'mean', got {mode!r}")
 
 # Step 23 - gat_layer_forward (not yet solved)
 # TODO: implement
