@@ -669,8 +669,79 @@ def merge_gat_heads(head_outputs, mode='concat'):
         return stacked.mean(dim=0)
     raise ValueError(f"mode must be 'concat' or 'mean', got {mode!r}")
 
-# Step 23 - gat_layer_forward (not yet solved)
-# TODO: implement
+# Step 23 - gat_layer_forward
+def gat_layer_forward(node_features, src, dst, head_params, merge_mode='concat', num_nodes=None, activation=None):
+    """Multi-head GAT layer: run each head, merge, optional activation.
+
+    Args:
+        node_features: FloatTensor (N, Fin).
+        src: LongTensor (E,) source indices.
+        dst: LongTensor (E,) destination indices.
+        head_params: list of dicts with keys weight, attn_src, attn_dst,
+            and optional bias for each head.
+        merge_mode: 'concat' or 'mean'.
+        num_nodes: optional int N; inferred from node_features if None.
+        activation: optional callable applied after merging heads.
+
+    Returns:
+        out: FloatTensor (N, F_merged).
+        all_attn: list of FloatTensor (E,) attention coeffs per head.
+    """
+    if merge_mode not in ('concat', 'mean'):
+        raise ValueError(f"merge_mode must be 'concat' or 'mean', got {merge_mode!r}")
+    if num_nodes is None:
+        num_nodes = node_features.size(0)
+
+    head_outs = []
+    all_attn = []
+
+    for params in head_params:
+        weight = params['weight']
+        attn_src = params['attn_src']
+        attn_dst = params['attn_dst']
+        bias = params.get('bias')
+
+        # Shared linear transform.
+        z = node_features @ weight  # (N, Fout)
+
+        # Attention logits: LeakyReLU(a_src . z_i + a_dst . z_j) per edge i -> j.
+        logits = F.leaky_relu(
+            (z @ attn_src).index_select(0, src) + (z @ attn_dst).index_select(0, dst),
+            negative_slope=0.2,
+        )  # (E,)
+
+        # Numerically stable softmax over each destination's incoming edges.
+        max_per_node = torch.full((num_nodes,), float("-inf"),
+                                  dtype=logits.dtype, device=logits.device)
+        max_per_node = max_per_node.scatter_reduce(0, dst, logits, reduce="amax", include_self=True)
+        exp = torch.exp(logits - max_per_node.index_select(0, dst))
+        denom = torch.zeros(num_nodes, dtype=logits.dtype, device=logits.device)
+        denom = denom.index_add(0, dst, exp)
+        alpha = exp / denom.index_select(0, dst)  # (E,)
+
+        # Weighted aggregation of source features onto destinations.
+        messages = z.index_select(0, src) * alpha.unsqueeze(-1)  # (E, Fout)
+        out_h = torch.zeros(num_nodes, z.size(1), dtype=z.dtype, device=z.device)
+        out_h = out_h.index_add(0, dst, messages)
+
+        if bias is not None:
+            out_h = out_h + bias
+
+        head_outs.append(out_h)
+        all_attn.append(alpha)
+
+    # Merge heads: concat along features, or average across heads.
+    stacked = torch.stack(head_outs, dim=0)  # (K, N, Fout)
+    if merge_mode == 'concat':
+        K, N, Fout = stacked.shape
+        out = stacked.permute(1, 0, 2).reshape(N, K * Fout)
+    else:
+        out = stacked.mean(dim=0)
+
+    if activation is not None:
+        out = activation(out)
+
+    return out, all_attn
 
 # Step 24 - init_gat_parameters (not yet solved)
 # TODO: implement
