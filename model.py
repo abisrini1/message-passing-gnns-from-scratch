@@ -1319,8 +1319,83 @@ def gnn_train_step(params, batch, forward_fn, loss_fn, lr):
 
     return {'loss': loss.item(), 'params': params}
 
-# Step 42 - train_node_classifier (not yet solved)
-# TODO: implement
+# Step 42 - train_node_classifier
+class _History(list):
+    """List of per-epoch dicts that also supports history['loss'] -> list of values."""
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            return [entry[key] for entry in self]
+        return super().__getitem__(key)
+
+
+def train_node_classifier(params, dataset, forward_fn, num_epochs, lr, mask_key='train_mask'):
+    """Train a functional node-classification GNN for several epochs on a masked graph.
+
+    Args:
+        params: dict (or list) of leaf tensors with requires_grad=True.
+        dataset: a graph dict with node features ('x' or 'node_features'),
+            'edge_index', node labels ('node_labels', or 'y' / 'labels'), and a
+            boolean node mask under mask_key. A list of such graph dicts is also
+            accepted; each epoch then takes one SGD step per graph. If the mask
+            is missing, all nodes are used.
+        forward_fn: callable(params, x, edge_index) -> logits (N, C).
+        num_epochs: int, number of passes over the dataset.
+        lr: float, SGD learning rate.
+        mask_key: key of the boolean training mask in each graph dict.
+
+    Returns:
+        dict with:
+            'history': one entry per epoch, each a dict with 'loss' and 'acc'
+                       (also 'accuracy'), both measured before that epoch's update.
+                       Indexing by a string, e.g. history['loss'], gives the list
+                       of values over epochs.
+            'losses':  list of the per-epoch losses
+            'params':  the same params container, updated in place
+    """
+    graphs = dataset if isinstance(dataset, (list, tuple)) else [dataset]
+    tensors = list(params.values()) if isinstance(params, dict) else list(params)
+
+    def first_key(g, keys, what):
+        for key in keys:
+            if key in g:
+                return g[key]
+        raise KeyError(f"graph has no {what} key (tried {keys})")
+
+    history = _History()
+    for _ in range(num_epochs):
+        epoch_loss, epoch_correct, epoch_count = 0.0, 0, 0
+        for g in graphs:
+            x = first_key(g, ('x', 'node_features', 'features'), 'feature')
+            labels = first_key(g, ('node_labels', 'y', 'labels'), 'label')
+
+            logits = forward_fn(params, x, g['edge_index'])
+            mask = g.get(mask_key)
+            if mask is not None:
+                logits, labels = logits[mask], labels[mask]
+
+            # Mean cross-entropy over the training nodes (stable log-softmax).
+            log_probs = logits - torch.logsumexp(logits, dim=1, keepdim=True)
+            loss = -log_probs.gather(1, labels.unsqueeze(1)).squeeze(1).mean()
+
+            epoch_correct += int((logits.argmax(dim=1) == labels).sum())
+            epoch_count += labels.numel()
+            epoch_loss += loss.item()
+
+            grads = torch.autograd.grad(loss, tensors, allow_unused=True)
+            with torch.no_grad():
+                for p, gr in zip(tensors, grads):
+                    if gr is not None:
+                        p.sub_(lr * gr)
+
+        acc = epoch_correct / max(epoch_count, 1)
+        history.append({'loss': epoch_loss / len(graphs), 'acc': acc, 'accuracy': acc})
+
+    return {
+        'history': history,
+        'losses': [h['loss'] for h in history],
+        'params': params,
+    }
 
 # Step 43 - train_graph_regressor (not yet solved)
 # TODO: implement
