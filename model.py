@@ -939,8 +939,37 @@ def global_max_pool(node_features, batch_index, num_graphs=None):
     index = batch_index.unsqueeze(-1).expand(-1, F_dim)
     return out.scatter_reduce(0, index, node_features, reduce="amax", include_self=True)
 
-# Step 29 - global_mean_max_pool (not yet solved)
-# TODO: implement
+# Step 29 - global_mean_max_pool
+def global_mean_max_pool(node_features, batch_index, num_graphs=None):
+    """Concatenate global mean and max pooled features into a 2F-dim graph vector.
+
+    Args:
+        node_features: FloatTensor of shape (N, F).
+        batch_index: LongTensor of shape (N,) with graph ids in {0, ..., B-1}.
+        num_graphs: Optional int B. If None, inferred as batch_index.max() + 1.
+
+    Returns:
+        FloatTensor of shape (B, 2F); each row is [mean_pool || max_pool].
+    """
+    if num_graphs is None:
+        num_graphs = int(batch_index.max()) + 1 if batch_index.numel() > 0 else 0
+
+    F_dim = node_features.size(1)
+    dtype, device = node_features.dtype, node_features.device
+
+    # Mean pool: per-graph sum divided by node count.
+    sums = torch.zeros(num_graphs, F_dim, dtype=dtype, device=device)
+    sums = sums.index_add(0, batch_index, node_features)
+    counts = torch.zeros(num_graphs, dtype=dtype, device=device)
+    counts = counts.index_add(0, batch_index, torch.ones_like(batch_index, dtype=dtype))
+    mean_pool = sums / counts.clamp(min=1).unsqueeze(-1)
+
+    # Max pool: elementwise max per graph.
+    max_pool = torch.full((num_graphs, F_dim), float("-inf"), dtype=dtype, device=device)
+    index = batch_index.unsqueeze(-1).expand(-1, F_dim)
+    max_pool = max_pool.scatter_reduce(0, index, node_features, reduce="amax", include_self=True)
+
+    return torch.cat([mean_pool, max_pool], dim=-1)  # (B, 2F)
 
 # Step 30 - node_classification_head (not yet solved)
 # TODO: implement
