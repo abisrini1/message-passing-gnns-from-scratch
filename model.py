@@ -1010,8 +1010,62 @@ def graph_regression_head(graph_embeddings, weight, bias=None):
         out = out + bias
     return out
 
-# Step 32 - generate_sbm_graph (not yet solved)
-# TODO: implement
+# Step 32 - generate_sbm_graph
+import torch
+
+
+def generate_sbm_graph(num_nodes, num_classes, p_in, p_out, feature_dim, seed=None):
+    """Sample one stochastic block model (SBM) graph with random node features.
+
+    Args:
+        num_nodes: int, number of nodes N.
+        num_classes: int, number of communities C.
+        p_in: float, edge probability between nodes in the same community.
+        p_out: float, edge probability between nodes in different communities.
+        feature_dim: int, node feature dimension F.
+        seed: optional int for reproducible sampling.
+
+    Returns:
+        dict with exactly these keys:
+            'num_nodes':     int N
+            'node_features': FloatTensor (N, F), standard normal features
+            'edge_index':    LongTensor (2, E); for each undirected edge i < j
+                             (in row-major order) it holds (i, j) then (j, i)
+            'node_labels':   LongTensor (N,), community ids in contiguous blocks
+
+        The graph is undirected and has no self-loops.
+    """
+    generator = torch.Generator()
+    if seed is not None:
+        generator.manual_seed(seed)
+
+    # Contiguous blocks; when N % C != 0 the later classes get the extra nodes,
+    # e.g. N=5, C=3 -> [0, 1, 1, 2, 2].
+    idx = torch.arange(num_nodes)
+    labels = ((idx * num_classes + num_classes - 1) // max(num_nodes, 1)).to(torch.long)
+
+    # p_in within a community, p_out across communities.
+    same = labels.unsqueeze(0) == labels.unsqueeze(1)  # (N, N)
+    probs = torch.where(same, torch.tensor(float(p_in)), torch.tensor(float(p_out)))
+
+    # Sample each unordered pair once (strict upper triangle).
+    draws = torch.rand(num_nodes, num_nodes, generator=generator)
+    upper = torch.triu(draws < probs, diagonal=1)
+    row, col = upper.nonzero(as_tuple=True)  # row-major, so row < col
+
+    # Interleave both directions per edge: (i, j), (j, i), (i', j'), (j', i'), ...
+    src = torch.stack([row, col], dim=1).reshape(-1)
+    dst = torch.stack([col, row], dim=1).reshape(-1)
+    edge_index = torch.stack([src, dst], dim=0)  # (2, E)
+
+    node_features = torch.randn(num_nodes, feature_dim, generator=generator)
+
+    return {
+        'num_nodes': num_nodes,
+        'node_features': node_features,
+        'edge_index': edge_index,
+        'node_labels': labels,
+    }
 
 # Step 33 - build_node_classification_dataset (not yet solved)
 # TODO: implement
