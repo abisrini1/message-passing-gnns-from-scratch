@@ -1259,8 +1259,23 @@ def accuracy_metric(logits, targets):
     preds = logits.argmax(dim=1)
     return (preds == targets).float().mean().item()
 
-# Step 40 - mae_metric (not yet solved)
-# TODO: implement
+# Step 40 - mae_metric
+def mae_metric(predictions, targets):
+    """Compute mean absolute error between predicted and target continuous values.
+
+    Args:
+        predictions: FloatTensor, e.g. (B,) or (B, 1).
+        targets: FloatTensor with the same number of elements, e.g. (B,) or (B, 1).
+
+    Returns:
+        Python float: mean of |predictions - targets|. Returns 0.0 when empty.
+    """
+    # Flatten so (B, 1) vs (B,) pairs element by element instead of broadcasting.
+    predictions = predictions.reshape(-1)
+    targets = targets.reshape(-1).to(predictions.dtype)
+    if predictions.numel() == 0:
+        return 0.0
+    return (predictions - targets).abs().mean().item()
 
 # Step 41 - gnn_train_step (not yet solved)
 # TODO: implement
