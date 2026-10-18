@@ -743,8 +743,47 @@ def gat_layer_forward(node_features, src, dst, head_params, merge_mode='concat',
 
     return out, all_attn
 
-# Step 24 - init_gat_parameters (not yet solved)
-# TODO: implement
+# Step 24 - init_gat_parameters
+def init_gat_parameters(in_dim, out_dim, num_heads=1, with_bias=True, seed=None):
+    """Initialize multi-head GAT parameters with Glorot (Xavier) uniform init.
+
+    Args:
+        in_dim: int, input feature dimension.
+        out_dim: int, per-head output feature dimension.
+        num_heads: int, number of attention heads.
+        with_bias: bool, whether each head gets a bias vector.
+        seed: optional int for reproducible initialization.
+
+    Returns:
+        list of num_heads dicts, each with:
+            'weight':   nn.Parameter (in_dim, out_dim), U(-a, a), a = sqrt(6 / (in_dim + out_dim))
+            'attn_src': nn.Parameter (out_dim,), U(-b, b), b = sqrt(6 / (out_dim + 1))
+            'attn_dst': nn.Parameter (out_dim,), same distribution as attn_src
+            'bias':     nn.Parameter (out_dim,), zeros (only if with_bias)
+        This is the format gat_layer_forward expects for head_params.
+    """
+    generator = None
+    if seed is not None:
+        generator = torch.Generator()
+        generator.manual_seed(seed)
+
+    def glorot(shape, fan_in, fan_out):
+        limit = math.sqrt(6.0 / (fan_in + fan_out))
+        return nn.Parameter((torch.rand(*shape, generator=generator) * 2.0 - 1.0) * limit)
+
+    head_params = []
+    for _ in range(num_heads):
+        params = {
+            'weight': glorot((in_dim, out_dim), in_dim, out_dim),
+            # Attention vectors are treated as (out_dim, 1) matrices for Glorot.
+            'attn_src': glorot((out_dim,), out_dim, 1),
+            'attn_dst': glorot((out_dim,), out_dim, 1),
+        }
+        if with_bias:
+            params['bias'] = nn.Parameter(torch.zeros(out_dim))
+        head_params.append(params)
+
+    return head_params
 
 # Step 25 - gat_stack_forward (not yet solved)
 # TODO: implement
