@@ -785,8 +785,88 @@ def init_gat_parameters(in_dim, out_dim, num_heads=1, with_bias=True, seed=None)
 
     return head_params
 
-# Step 25 - gat_stack_forward (not yet solved)
-# TODO: implement
+# Step 25 - gat_stack_forward
+def gat_stack_forward(node_features, src, dst, layer_param_list, merge_modes=None, activations=None, num_nodes=None):
+    """Run a stack of multi-head GAT layers.
+
+    Args:
+        node_features: FloatTensor (N, F0).
+        src: LongTensor (E,) source indices.
+        dst: LongTensor (E,) destination indices.
+        layer_param_list: list of length L; each entry is a head_params list
+            for gat_layer_forward.
+        merge_modes: optional list of L merge mode strings ('concat' or 'mean').
+            Defaults to 'concat' for every layer.
+        activations: optional list of L callables or None. Defaults to no
+            activation for every layer.
+        num_nodes: optional int N; inferred from node_features if None.
+
+    Returns:
+        embeddings: FloatTensor (N, FL) final layer output.
+        all_layer_outputs: list of L FloatTensors, the output after each layer.
+    """
+    L = len(layer_param_list)
+    if num_nodes is None:
+        num_nodes = node_features.size(0)
+    if merge_modes is None:
+        merge_modes = ['concat'] * L
+    if activations is None:
+        activations = [None] * L
+    if len(merge_modes) != L:
+        raise ValueError(f"merge_modes has length {len(merge_modes)} but there are {L} layers")
+    if len(activations) != L:
+        raise ValueError(f"activations has length {len(activations)} but there are {L} layers")
+
+    def gat_layer(h, head_params, merge_mode, activation):
+        if merge_mode not in ('concat', 'mean'):
+            raise ValueError(f"merge_mode must be 'concat' or 'mean', got {merge_mode!r}")
+
+        head_outs = []
+        for params in head_params:
+            z = h @ params['weight']  # (N, Fout)
+
+            # Attention logits, then stable softmax over each destination's edges.
+            logits = F.leaky_relu(
+                (z @ params['attn_src']).index_select(0, src)
+                + (z @ params['attn_dst']).index_select(0, dst),
+                negative_slope=0.2,
+            )
+            max_per_node = torch.full((num_nodes,), float("-inf"),
+                                      dtype=logits.dtype, device=logits.device)
+            max_per_node = max_per_node.scatter_reduce(0, dst, logits, reduce="amax", include_self=True)
+            exp = torch.exp(logits - max_per_node.index_select(0, dst))
+            denom = torch.zeros(num_nodes, dtype=logits.dtype, device=logits.device)
+            denom = denom.index_add(0, dst, exp)
+            alpha = exp / denom.index_select(0, dst)
+
+            # Attention-weighted aggregation onto destinations.
+            messages = z.index_select(0, src) * alpha.unsqueeze(-1)
+            out_h = torch.zeros(num_nodes, z.size(1), dtype=z.dtype, device=z.device)
+            out_h = out_h.index_add(0, dst, messages)
+
+            bias = params.get('bias')
+            if bias is not None:
+                out_h = out_h + bias
+            head_outs.append(out_h)
+
+        stacked = torch.stack(head_outs, dim=0)  # (K, N, Fout)
+        if merge_mode == 'concat':
+            K, N, Fout = stacked.shape
+            out = stacked.permute(1, 0, 2).reshape(N, K * Fout)
+        else:
+            out = stacked.mean(dim=0)
+
+        if activation is not None:
+            out = activation(out)
+        return out
+
+    h = node_features
+    all_layer_outputs = []
+    for head_params, mode, act in zip(layer_param_list, merge_modes, activations):
+        h = gat_layer(h, head_params, mode, act)
+        all_layer_outputs.append(h)
+
+    return h, all_layer_outputs
 
 # Step 26 - global_mean_pool (not yet solved)
 # TODO: implement
