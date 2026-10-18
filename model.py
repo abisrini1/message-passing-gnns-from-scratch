@@ -1397,8 +1397,53 @@ def train_node_classifier(params, dataset, forward_fn, num_epochs, lr, mask_key=
         'params': params,
     }
 
-# Step 43 - train_graph_regressor (not yet solved)
-# TODO: implement
+# Step 43 - train_graph_regressor
+def train_graph_regressor(params, graphs, forward_fn, num_epochs, lr, batch_size=8):
+    """Train a graph regressor over multiple epochs of mini-batches.
+
+    Args:
+        params: dict of trainable torch tensors.
+        graphs: list of graph dicts with keys x, edge_index, y.
+        forward_fn: callable(params, batch) -> predictions.
+        num_epochs: number of training epochs.
+        lr: learning rate for SGD updates.
+        batch_size: graphs per mini-batch (default 8).
+
+    Returns:
+        history: dict with 'loss' and 'mae' lists of per-epoch floats.
+        params: updated parameter dict.
+    """
+    tensors = list(params.values()) if isinstance(params, dict) else list(params)
+    history = {'loss': [], 'mae': []}
+
+    for _ in range(num_epochs):
+        loss_sum, abs_err_sum, count = 0.0, 0.0, 0
+
+        # Fixed order (no shuffling), so results are reproducible.
+        for start in range(0, len(graphs), batch_size):
+            batch = collate_graph_batch(graphs[start:start + batch_size])
+
+            preds = forward_fn(params, batch).reshape(-1)
+            targets = batch['y'].reshape(-1).to(preds.dtype)
+            diff = preds - targets
+            loss = (diff * diff).mean()
+
+            grads = torch.autograd.grad(loss, tensors, allow_unused=True)
+            with torch.no_grad():
+                for p, g in zip(tensors, grads):
+                    if g is not None:
+                        p.sub_(lr * g)
+
+            # Metrics come from the pre-update forward pass, weighted by graph count.
+            n = targets.numel()
+            loss_sum += loss.item() * n
+            abs_err_sum += diff.detach().abs().sum().item()
+            count += n
+
+        history['loss'].append(loss_sum / max(count, 1))
+        history['mae'].append(abs_err_sum / max(count, 1))
+
+    return history, params
 
 # Step 44 - representation_similarity (not yet solved)
 # TODO: implement
