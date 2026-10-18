@@ -1093,8 +1093,49 @@ def build_node_classification_dataset(num_graphs, num_nodes, num_classes, p_in, 
         )
     return dataset
 
-# Step 34 - generate_molecule_like_graph (not yet solved)
-# TODO: implement
+# Step 34 - generate_molecule_like_graph
+import torch
+
+
+def generate_molecule_like_graph(num_nodes, num_node_features, edge_prob=0.3, seed=0):
+    """Synthesize one molecule-like graph with node features, edges, and a scalar target.
+
+    Args:
+        num_nodes: int, number of atoms N.
+        num_node_features: int, feature dimension F per atom.
+        edge_prob: float, probability of each undirected node pair being bonded.
+        seed: int, seed for reproducible sampling.
+
+    Returns:
+        dict with:
+            'x':          FloatTensor (N, F), standard normal features
+            'edge_index': LongTensor (2, E); for each undirected edge i < j
+                          (row-major order) it holds (i, j) then (j, i).
+                          Shape (2, 0) when there are no edges.
+            'y':          0-dim FloatTensor, mean over nodes v of
+                          deg(v) * mean(x[v]), where deg(v) is the number of
+                          edges leaving v in edge_index.
+    """
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+
+    # Each unordered pair is an edge with probability edge_prob (no self-loops).
+    draws = torch.rand(num_nodes, num_nodes, generator=generator)
+    upper = torch.triu(draws < edge_prob, diagonal=1)
+    row, col = upper.nonzero(as_tuple=True)  # row-major, so row < col
+
+    # Interleave both directions per edge: (i, j), (j, i), ...
+    src = torch.stack([row, col], dim=1).reshape(-1)
+    dst = torch.stack([col, row], dim=1).reshape(-1)
+    edge_index = torch.stack([src, dst], dim=0).to(torch.long)  # (2, E)
+
+    x = torch.randn(num_nodes, num_node_features, generator=generator)
+
+    # Target: mean_v deg(v) * mean(x[v]), so it depends on structure and features.
+    deg = torch.bincount(edge_index[0], minlength=num_nodes).to(torch.float32)
+    y = (deg * x.mean(dim=1)).mean()  # 0-dim
+
+    return {'x': x, 'edge_index': edge_index, 'y': y}
 
 # Step 35 - build_graph_regression_dataset (not yet solved)
 # TODO: implement
