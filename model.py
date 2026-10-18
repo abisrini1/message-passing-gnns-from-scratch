@@ -1243,8 +1243,21 @@ def mse_loss(predictions, targets):
     diff = predictions - targets
     return (diff * diff).mean()
 
-# Step 39 - accuracy_metric (not yet solved)
-# TODO: implement
+# Step 39 - accuracy_metric
+def accuracy_metric(logits, targets):
+    """Return the fraction of argmax(logits) predictions matching targets.
+
+    Args:
+        logits: FloatTensor (N, C) of class scores.
+        targets: LongTensor (N,) of class indices.
+
+    Returns:
+        Python float in [0, 1]. Returns 0.0 when there are no samples.
+    """
+    if targets.numel() == 0:
+        return 0.0
+    preds = logits.argmax(dim=1)
+    return (preds == targets).float().mean().item()
 
 # Step 40 - mae_metric (not yet solved)
 # TODO: implement
