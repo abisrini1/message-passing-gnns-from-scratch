@@ -1169,8 +1169,45 @@ def build_graph_regression_dataset(num_graphs, num_nodes_range, num_node_feature
         )
     return dataset
 
-# Step 36 - collate_graph_batch (not yet solved)
-# TODO: implement
+# Step 36 - collate_graph_batch
+def collate_graph_batch(graphs):
+    """Combine variable-size graphs into one disconnected batched graph.
+
+    Args:
+        graphs: list of dicts, each with
+            'x':          FloatTensor (N_i, F)
+            'edge_index': LongTensor (2, E_i)
+            'y':          graph-level target, optional; a 0-dim tensor or a
+                          Python number
+
+    Returns:
+        dict with:
+            'x':          FloatTensor (sum N_i, F), node features stacked
+            'edge_index': LongTensor (2, sum E_i), node indices shifted by the
+                          number of nodes in the preceding graphs
+            'y':          FloatTensor (B,), targets stacked (only if present)
+            'batch':      LongTensor (sum N_i,), graph id of each node
+    """
+    xs, edge_indices, ys, batch_ids = [], [], [], []
+    offset = 0
+
+    for g_id, g in enumerate(graphs):
+        n = g['x'].size(0)
+        xs.append(g['x'])
+        edge_indices.append(g['edge_index'].to(torch.long) + offset)
+        batch_ids.append(torch.full((n,), g_id, dtype=torch.long))
+        if 'y' in g:
+            ys.append(torch.as_tensor(g['y'], dtype=torch.float32).reshape(-1))
+        offset += n
+
+    out = {
+        'x': torch.cat(xs, dim=0),
+        'edge_index': torch.cat(edge_indices, dim=1),
+        'batch': torch.cat(batch_ids, dim=0),
+    }
+    if ys:
+        out['y'] = torch.cat(ys, dim=0)
+    return out
 
 # Step 37 - cross_entropy_loss (not yet solved)
 # TODO: implement
