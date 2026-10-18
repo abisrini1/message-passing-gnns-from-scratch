@@ -389,8 +389,50 @@ def gcn_linear_transform(node_features, weight, bias=None):
         out = out + bias
     return out
 
-# Step 16 - gcn_layer_forward (not yet solved)
-# TODO: implement
+# Step 16 - gcn_layer_forward
+def gcn_layer_forward(node_features, src, dst, weight, bias=None, num_nodes=None, activation=None):
+    """Forward pass of one GCN layer: renormalize, transform, propagate.
+
+    Args:
+        node_features: FloatTensor of shape (N, Fin).
+        src: LongTensor of shape (E,) source indices.
+        dst: LongTensor of shape (E,) destination indices.
+        weight: FloatTensor of shape (Fin, Fout).
+        bias: optional FloatTensor of shape (Fout,).
+        num_nodes: optional int N; defaults to node_features.shape[0].
+        activation: optional callable applied to the output.
+
+    Returns:
+        FloatTensor of shape (N, Fout).
+    """
+    if num_nodes is None:
+        num_nodes = node_features.size(0)
+
+    # 1) Renormalize: A_tilde = A + I, weights 1 / sqrt(d_i * d_j).
+    loops = torch.arange(num_nodes, dtype=src.dtype, device=src.device)
+    src_hat = torch.cat([src, loops], dim=0)
+    dst_hat = torch.cat([dst, loops.to(dst.dtype)], dim=0)
+
+    ones = torch.ones(src_hat.size(0), dtype=node_features.dtype, device=node_features.device)
+    deg = torch.zeros(num_nodes, dtype=node_features.dtype, device=node_features.device)
+    deg.scatter_add_(0, dst_hat, ones)
+    deg_inv_sqrt = deg.pow(-0.5)  # deg >= 1 because of the self-loops
+    norm = deg_inv_sqrt[src_hat] * deg_inv_sqrt[dst_hat]  # (E + N,)
+
+    # 2) Transform: X W.
+    h = node_features @ weight  # (N, Fout)
+
+    # 3) Propagate: out_j = sum over edges (i -> j) of norm_ij * h_i.
+    messages = h.index_select(0, src_hat) * norm.unsqueeze(-1)  # (E + N, Fout)
+    out = torch.zeros(num_nodes, h.size(1), dtype=h.dtype, device=h.device)
+    out = out.index_add(0, dst_hat, messages)
+
+    # Bias after propagation, then optional nonlinearity.
+    if bias is not None:
+        out = out + bias
+    if activation is not None:
+        out = activation(out)
+    return out
 
 # Step 17 - init_gcn_parameters (not yet solved)
 # TODO: implement
