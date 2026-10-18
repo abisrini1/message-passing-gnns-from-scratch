@@ -1277,8 +1277,47 @@ def mae_metric(predictions, targets):
         return 0.0
     return (predictions - targets).abs().mean().item()
 
-# Step 41 - gnn_train_step (not yet solved)
-# TODO: implement
+# Step 41 - gnn_train_step
+def _get_targets(batch):
+    """Extract the training targets from a batch dict (or return it unchanged)."""
+    if isinstance(batch, dict):
+        for key in ('y', 'node_labels', 'labels', 'target'):
+            if key in batch:
+                return batch[key]
+        raise KeyError("batch has no target key ('y', 'node_labels', 'labels', 'target')")
+    return batch
+
+
+def gnn_train_step(params, batch, forward_fn, loss_fn, lr):
+    """Run one SGD training step and update params in-place.
+
+    Args:
+        params: dict (or list) of leaf tensors with requires_grad=True.
+        batch: a batch dict holding the model inputs and the targets.
+        forward_fn: callable(params, batch) -> model output.
+        loss_fn: callable(output, targets) -> 0-dim loss tensor, where
+            targets = batch['y'] (or 'node_labels' for node classification).
+        lr: float, SGD learning rate.
+
+    Returns:
+        dict with:
+            'loss':   Python float, the loss computed before the update
+            'params': the same params container, with its tensors updated in place
+    """
+    tensors = list(params.values()) if isinstance(params, dict) else list(params)
+
+    output = forward_fn(params, batch)
+    loss = loss_fn(output, _get_targets(batch))
+
+    # allow_unused: a parameter that doesn't affect the loss gets a zero update.
+    grads = torch.autograd.grad(loss, tensors, allow_unused=True)
+
+    with torch.no_grad():
+        for p, g in zip(tensors, grads):
+            if g is not None:
+                p.sub_(lr * g)
+
+    return {'loss': loss.item(), 'params': params}
 
 # Step 42 - train_node_classifier (not yet solved)
 # TODO: implement
