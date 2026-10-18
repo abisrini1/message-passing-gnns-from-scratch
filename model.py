@@ -1491,6 +1491,128 @@ def oversmoothing_diagnostic(layer_features):
         'pairwise_similarities': pairwise,
     }
 
-# Step 46 - mpnn_gnn_experiment (not yet solved)
-# TODO: implement
+# Step 46 - mpnn_gnn_experiment
+def mpnn_gnn_experiment(num_nodes=40, num_features=8, num_classes=2, num_layers=3, hidden_dim=16, num_epochs=20, lr=0.01, seed=0):
+    """Run an end-to-end GCN-vs-GAT node-classification comparison on one SBM graph.
+
+    Returns:
+        dict with keys 'dataset_sizes', 'gcn', 'gat'.
+            'dataset_sizes': {'N', 'C', 'F', 'E', 'train', 'test'}
+            'gcn' / 'gat': dict with 'history', 'losses', 'train_acc',
+                'test_acc', 'oversmoothing'.
+            'oversmoothing': {'pairwise_similarities': list of num_layers - 1
+                linear-CKA values between consecutive representations in
+                [input features, hidden layer 1, ..., hidden layer L-1],
+                'mean_similarity': their mean}; all values lie in [0, 1].
+    """
+    # ---- Data: one SBM graph and a 50/50 train/test node split ----
+    graph = generate_sbm_graph(num_nodes, num_classes, 0.3, 0.05, num_features, seed=seed)
+    x = graph['node_features']
+    edge_index = graph['edge_index']
+    labels = graph['node_labels']
+
+    split_gen = torch.Generator()
+    split_gen.manual_seed(seed)
+    perm = torch.randperm(num_nodes, generator=split_gen)
+    train_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    train_mask[perm[: num_nodes // 2]] = True
+    test_mask = ~train_mask
+
+    train_graph = dict(graph)
+    train_graph['train_mask'] = train_mask
+
+    dataset_sizes = {
+        'N': num_nodes,
+        'C': num_classes,
+        'F': num_features,
+        'E': int(edge_index.size(1)),
+        'train': int(train_mask.sum()),
+        'test': int(test_mask.sum()),
+    }
+
+    # ---- GCN ----
+    gcn_dims = [num_features] + [hidden_dim] * (num_layers - 1) + [num_classes]
+    gcn_params = {}
+    for i in range(num_layers):
+        p = init_gcn_parameters(gcn_dims[i], gcn_dims[i + 1], with_bias=True, seed=seed + i)
+        gcn_params[f'l{i}.weight'] = p['weight']
+        gcn_params[f'l{i}.bias'] = p['bias']
+    gcn_acts = [torch.relu] * (num_layers - 1) + [None]
+
+    def gcn_forward_all(params, x_, edge_index_):
+        param_list = [
+            {'weight': params[f'l{i}.weight'], 'bias': params[f'l{i}.bias']}
+            for i in range(num_layers)
+        ]
+        return gcn_stack_forward(x_, edge_index_[0], edge_index_[1], param_list, gcn_acts)
+
+    # ---- GAT (2 heads in hidden layers, 1 head averaged in the output layer) ----
+    num_heads = 2
+    head_dim = max(hidden_dim // num_heads, 1)
+    hidden_width = num_heads * head_dim
+    gat_params = {}
+    gat_in = num_features
+    for i in range(num_layers):
+        last = i == num_layers - 1
+        heads = 1 if last else num_heads
+        out_dim = num_classes if last else head_dim
+        head_params = init_gat_parameters(gat_in, out_dim, num_heads=heads, with_bias=True, seed=seed + i)
+        for j, hp in enumerate(head_params):
+            for name, tensor in hp.items():
+                gat_params[f'l{i}.h{j}.{name}'] = tensor
+        gat_in = hidden_width
+    gat_modes = ['concat'] * (num_layers - 1) + ['mean']
+    gat_acts = [F.elu] * (num_layers - 1) + [None]
+
+    def gat_forward_all(params, x_, edge_index_):
+        # Standard GAT: every node also attends to itself.
+        src, dst = add_self_loops(edge_index_[0], edge_index_[1], x_.size(0))
+        layer_param_list = []
+        for i in range(num_layers):
+            heads = 1 if i == num_layers - 1 else num_heads
+            layer_param_list.append([
+                {name: params[f'l{i}.h{j}.{name}'] for name in ('weight', 'attn_src', 'attn_dst', 'bias')}
+                for j in range(heads)
+            ])
+        return gat_stack_forward(x_, src, dst, layer_param_list, gat_modes, gat_acts)
+
+    # ---- Width-agnostic similarity between two representations of the same nodes ----
+    def linear_cka(a, b):
+        a = a - a.mean(dim=0, keepdim=True)
+        b = b - b.mean(dim=0, keepdim=True)
+        cross = (a.t() @ b).pow(2).sum()
+        norm_a = (a.t() @ a).norm()
+        norm_b = (b.t() @ b).norm()
+        value = cross / (norm_a * norm_b).clamp(min=1e-12)
+        return float(value.clamp(0.0, 1.0))
+
+    # ---- Train and evaluate both models the same way ----
+    def run(params, forward_all):
+        forward_fn = lambda p, x_, ei: forward_all(p, x_, ei)[0]
+        result = train_node_classifier(params, train_graph, forward_fn, num_epochs, lr)
+
+        with torch.no_grad():
+            logits, layer_outputs = forward_all(params, x, edge_index)
+
+        # [input features, hidden layer 1, ..., hidden layer L-1]: L entries, L-1 pairs.
+        sequence = [x] + [h.detach() for h in layer_outputs[:-1]]
+        pairwise = [linear_cka(a, b) for a, b in zip(sequence[:-1], sequence[1:])]
+        oversmoothing = {
+            'pairwise_similarities': pairwise,
+            'mean_similarity': sum(pairwise) / len(pairwise) if pairwise else 0.0,
+        }
+
+        return {
+            'history': result['history'],
+            'losses': result['losses'],
+            'train_acc': accuracy_metric(logits[train_mask], labels[train_mask]),
+            'test_acc': accuracy_metric(logits[test_mask], labels[test_mask]),
+            'oversmoothing': oversmoothing,
+        }
+
+    return {
+        'dataset_sizes': dataset_sizes,
+        'gcn': run(gcn_params, gcn_forward_all),
+        'gat': run(gat_params, gat_forward_all),
+    }
 
