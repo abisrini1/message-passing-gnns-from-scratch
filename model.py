@@ -1137,8 +1137,37 @@ def generate_molecule_like_graph(num_nodes, num_node_features, edge_prob=0.3, se
 
     return {'x': x, 'edge_index': edge_index, 'y': y}
 
-# Step 35 - build_graph_regression_dataset (not yet solved)
-# TODO: implement
+# Step 35 - build_graph_regression_dataset
+def build_graph_regression_dataset(num_graphs, num_nodes_range, num_node_features, edge_prob=0.3, seed=0):
+    """Build a list of molecule-like graphs for graph-level regression.
+
+    Args:
+        num_graphs: int, number of graphs to generate.
+        num_nodes_range: (min_nodes, max_nodes), inclusive. Graph i has
+            min_nodes + (i % (max_nodes - min_nodes + 1)) nodes, so sizes cycle
+            through the range. A single int gives fixed-size graphs.
+        num_node_features: int, feature dimension per node.
+        edge_prob: float, probability of each undirected node pair being bonded.
+        seed: int; graph i is generated with seed + i, so the whole dataset
+            is reproducible.
+
+    Returns:
+        list of num_graphs dicts, each as returned by generate_molecule_like_graph
+        ('x', 'edge_index', 'y').
+    """
+    if isinstance(num_nodes_range, int):
+        lo = hi = num_nodes_range
+    else:
+        lo, hi = num_nodes_range
+
+    span = hi - lo + 1
+    dataset = []
+    for i in range(num_graphs):
+        n = lo + (i % span)
+        dataset.append(
+            generate_molecule_like_graph(n, num_node_features, edge_prob=edge_prob, seed=seed + i)
+        )
+    return dataset
 
 # Step 36 - collate_graph_batch (not yet solved)
 # TODO: implement
