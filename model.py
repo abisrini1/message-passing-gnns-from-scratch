@@ -988,8 +988,27 @@ def node_classification_head(node_embeddings, weight, bias=None):
         logits = logits + bias
     return logits
 
-# Step 31 - graph_regression_head (not yet solved)
-# TODO: implement
+# Step 31 - graph_regression_head
+def graph_regression_head(graph_embeddings, weight, bias=None):
+    """Map pooled graph embeddings to regression predictions via a linear head.
+
+    Args:
+        graph_embeddings: FloatTensor of shape (B, H), one row per graph.
+        weight: FloatTensor of shape (T, H), where T is the number of targets
+            (the same layout as torch.nn.Linear.weight).
+        bias: optional FloatTensor of shape (T,).
+
+    Returns:
+        FloatTensor of shape (B, T) with the predictions.
+    """
+    # Fall back to an (H, T) layout only if the weight can't be (T, H).
+    if weight.size(1) != graph_embeddings.size(1) and weight.size(0) == graph_embeddings.size(1):
+        weight = weight.t()
+
+    out = graph_embeddings @ weight.t()
+    if bias is not None:
+        out = out + bias
+    return out
 
 # Step 32 - generate_sbm_graph (not yet solved)
 # TODO: implement
