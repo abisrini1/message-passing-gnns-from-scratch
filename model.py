@@ -971,8 +971,22 @@ def global_mean_max_pool(node_features, batch_index, num_graphs=None):
 
     return torch.cat([mean_pool, max_pool], dim=-1)  # (B, 2F)
 
-# Step 30 - node_classification_head (not yet solved)
-# TODO: implement
+# Step 30 - node_classification_head
+def node_classification_head(node_embeddings, weight, bias=None):
+    """Map node embeddings to per-node class logits via a linear head.
+
+    Args:
+        node_embeddings: FloatTensor of shape (N, H).
+        weight: FloatTensor of shape (H, C), where C is the number of classes.
+        bias: optional FloatTensor of shape (C,).
+
+    Returns:
+        FloatTensor of shape (N, C) with unnormalized class logits.
+    """
+    logits = node_embeddings @ weight
+    if bias is not None:
+        logits = logits + bias
+    return logits
 
 # Step 31 - graph_regression_head (not yet solved)
 # TODO: implement
