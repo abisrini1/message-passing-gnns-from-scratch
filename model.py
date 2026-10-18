@@ -469,8 +469,66 @@ def init_gcn_parameters(in_dim, out_dim, with_bias=True, seed=None):
         params['bias'] = nn.Parameter(torch.zeros(out_dim))
     return params
 
-# Step 18 - gcn_stack_forward (not yet solved)
-# TODO: implement
+# Step 18 - gcn_stack_forward
+def gcn_stack_forward(node_features, src, dst, param_list, activations=None, num_nodes=None):
+    """Run a stack of GCN layers to produce deep node embeddings.
+
+    Args:
+        node_features: FloatTensor of shape (N, F0).
+        src: LongTensor of shape (E,) source indices.
+        dst: LongTensor of shape (E,) destination indices.
+        param_list: list of dicts, each with 'weight' (Fin, Fout) and optional 'bias' (Fout,).
+        activations: optional list of callables or None, one per layer.
+        num_nodes: optional int N; defaults to node_features.shape[0].
+
+    Returns:
+        embeddings: FloatTensor of shape (N, FL), the final layer output.
+        all_layer_outputs: list of FloatTensor outputs after each layer.
+    """
+    if num_nodes is None:
+        num_nodes = node_features.size(0)
+
+    if activations is None:
+        activations = [None] * len(param_list)
+    if len(activations) != len(param_list):
+        raise ValueError(
+            f"activations has length {len(activations)} but param_list has "
+            f"length {len(param_list)}"
+        )
+
+    # Renormalize the adjacency once: A_tilde = A + I, weights 1 / sqrt(d_i * d_j).
+    loops = torch.arange(num_nodes, dtype=src.dtype, device=src.device)
+    src_hat = torch.cat([src, loops], dim=0)
+    dst_hat = torch.cat([dst, loops.to(dst.dtype)], dim=0)
+
+    ones = torch.ones(src_hat.size(0), dtype=node_features.dtype, device=node_features.device)
+    deg = torch.zeros(num_nodes, dtype=node_features.dtype, device=node_features.device)
+    deg.scatter_add_(0, dst_hat, ones)
+    deg_inv_sqrt = deg.pow(-0.5)
+    norm = (deg_inv_sqrt[src_hat] * deg_inv_sqrt[dst_hat]).unsqueeze(-1)  # (E + N, 1)
+
+    h = node_features
+    all_layer_outputs = []
+
+    for params, act in zip(param_list, activations):
+        weight = params['weight']
+        bias = params.get('bias')
+
+        # Transform, then propagate with the shared normalized adjacency.
+        z = h @ weight
+        messages = z.index_select(0, src_hat) * norm
+        out = torch.zeros(num_nodes, z.size(1), dtype=z.dtype, device=z.device)
+        out = out.index_add(0, dst_hat, messages)
+
+        if bias is not None:
+            out = out + bias
+        if act is not None:
+            out = act(out)
+
+        h = out
+        all_layer_outputs.append(h)
+
+    return h, all_layer_outputs
 
 # Step 19 - gat_attention_logits (not yet solved)
 # TODO: implement
