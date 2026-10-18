@@ -588,8 +588,59 @@ def gat_masked_neighbor_softmax(logits, dst, num_nodes):
 
     return exp / denom.index_select(0, dst)
 
-# Step 21 - gat_head_forward (not yet solved)
-# TODO: implement
+# Step 21 - gat_head_forward
+def gat_head_forward(node_features, src, dst, weight, attn_src, attn_dst, bias=None, num_nodes=None, activation=None):
+    """Forward pass of a single GAT attention head.
+
+    Args:
+        node_features: FloatTensor of shape (N, Fin).
+        src: LongTensor of shape (E,) source indices.
+        dst: LongTensor of shape (E,) destination indices.
+        weight: FloatTensor of shape (Fin, Fout) shared linear transform.
+        attn_src: FloatTensor of shape (Fout,) source attention vector.
+        attn_dst: FloatTensor of shape (Fout,) destination attention vector.
+        bias: optional FloatTensor of shape (Fout,).
+        num_nodes: optional int N; inferred from node_features if None.
+        activation: optional callable applied to the head output.
+
+    Returns:
+        head_out: FloatTensor of shape (N, Fout).
+        attn_coeffs: FloatTensor of shape (E,) attention coefficients.
+    """
+    if num_nodes is None:
+        num_nodes = node_features.size(0)
+
+    # 1) Shared linear transform: z = X W.
+    z = node_features @ weight  # (N, Fout)
+
+    # 2) Attention logits: LeakyReLU(a_src . z_i + a_dst . z_j) per edge i -> j.
+    score_src = z @ attn_src  # (N,)
+    score_dst = z @ attn_dst  # (N,)
+    logits = F.leaky_relu(
+        score_src.index_select(0, src) + score_dst.index_select(0, dst),
+        negative_slope=0.2,
+    )  # (E,)
+
+    # 3) Softmax over each destination node's incoming edges (stable).
+    max_per_node = torch.full((num_nodes,), float("-inf"),
+                              dtype=logits.dtype, device=logits.device)
+    max_per_node = max_per_node.scatter_reduce(0, dst, logits, reduce="amax", include_self=True)
+    exp = torch.exp(logits - max_per_node.index_select(0, dst))
+    denom = torch.zeros(num_nodes, dtype=logits.dtype, device=logits.device)
+    denom = denom.index_add(0, dst, exp)
+    attn_coeffs = exp / denom.index_select(0, dst)  # (E,)
+
+    # 4) Aggregate: out_j = sum over edges (i -> j) of alpha_ij * z_i.
+    messages = z.index_select(0, src) * attn_coeffs.unsqueeze(-1)  # (E, Fout)
+    head_out = torch.zeros(num_nodes, z.size(1), dtype=z.dtype, device=z.device)
+    head_out = head_out.index_add(0, dst, messages)
+
+    if bias is not None:
+        head_out = head_out + bias
+    if activation is not None:
+        head_out = activation(head_out)
+
+    return head_out, attn_coeffs
 
 # Step 22 - merge_gat_heads (not yet solved)
 # TODO: implement
