@@ -252,8 +252,20 @@ def aggregate_messages(messages, dst, num_nodes, aggr='sum'):
     index = dst.unsqueeze(-1).expand(-1, M)
     return out.scatter_reduce(0, index, messages, reduce="amax", include_self=True)
 
-# Step 11 - update_node_features (not yet solved)
-# TODO: implement
+# Step 11 - update_node_features
+def update_node_features(node_features, aggregated, update_fn):
+    """Fuse each node's current state with its aggregated message.
+
+    Args:
+        node_features: FloatTensor of shape (N, F), current node states h_v^t.
+        aggregated: FloatTensor of shape (N, M), aggregated messages m_v^{t+1}.
+        update_fn: callable(node_features, aggregated) -> new node states,
+            e.g. a GRUCell, an MLP over their concatenation, or a sum.
+
+    Returns:
+        FloatTensor of shape (N, F'), the updated node states h_v^{t+1}.
+    """
+    return update_fn(node_features, aggregated)
 
 # Step 12 - message_passing_layer (not yet solved)
 # TODO: implement
